@@ -1,0 +1,118 @@
+apiVersion: 0.2.0
+project:
+  name: super_cool_project # will get slugged to super-cool-project
+  partition_key_name: partitionKey
+  # DEFAULT values for each function
+  # include all in each function and overwrite where needed
+  config_defaults: &config_defaults
+    gpu: False
+    num_gpus: 1
+    docker_image: python:3.6-jessie
+    log_level: error
+  scaling_defaults: &scaling_defaults
+    min_replicas: 6
+    max_replicas: 6
+  env_defaults: &env_defaults
+    module_paths:
+      - /User/modules
+      - /User/iguazioig/examples/modules
+
+    # do not set any of these to null, it is handled
+    # class_module: # string; module in one of the paths above with the class named below
+    # class_name: # string; name of the class for processing
+    # class_init: # dict; kwargs to pass into the class init
+    # methods: # list; list of methods to invoke sequentially - must take 2 parameters context(Nuclio context)
+    #                  and message(dictionary)
+
+    stream_container: bigdata # bigdata if unset
+    stream_shards: 16 # if left unset, 3
+    stream_retention: 72 # if left unset 48
+
+    pip:
+      - nuclio-jupyter
+      - dataclasses
+
+  env_custom: &env_custom
+    # List Any variables that need to be set in the environment in this format
+    # ENV_VAR: value
+
+  v3io_streams:
+    # default path for stream is project name / streams / stream name
+    input_stream: {}
+    step2: {}
+    # you can override any value though
+    converge:
+      container: different
+      shards: 20
+      retention: 48
+      path: v0_1_streams/converge
+
+  v3io_volumes:
+    user-dir:
+      remote: users/marcelo
+      mount_path: /User
+    v3io-dir:
+      remote: bigdata/
+      mount_path: /v3io/bigdata
+
+  functions:
+    - name: step_1 # will get slugged to step-1
+      tag: 123456 # tags for your function to track the builds; defaults to latest
+      <<: *config_defaults
+      <<: *env_defaults
+      <<: *scaling_defaults
+      # Default overwrites
+      input_streams:
+        input_stream: {}
+          # polling_interval_ms: defaults to 500
+          # seek_to: defaults to latest
+          # read_batch_size: defaults to 100
+          # max_workers: defaults to the shard count of this stream
+      class_module: iguazio_functions
+      class_name: igz_stream_merge
+      methods:
+        - processing
+      outputs:
+        # list of stream names, containers/paths are handled
+        streams:
+          - output_stream
+      env_custom:
+        BATCH_RESULTS_FOLDER: /bigdata/batch_results
+        RESULTS_FILE: category1.json
+
+
+    - name: stream_converge
+      <<: *config_defaults
+      <<: *env_defaults
+      <<: *scaling_defaults
+      input_streams:
+        input_stream:
+          max_workers: 1
+        step2:
+          max_workers: 1
+      class_module: stream_converge_with_init
+      class_name: igz_stream_converge
+      methods:
+        - processing
+      # No outputs this function should handle the ouput
+      outputs:
+        https:
+          - fake
+      max_replicas: 1
+      min_replicas: 1
+
+      class_init:
+        container: bigdata
+        table_path: stream_processing/stream_converge_alpha3
+        results_file: batch_results/v0_1.csv
+        some_list:
+          - 1
+          - 2
+          - 3
+        a_boolean: True
+        # Above is presented to class **kwargs as:
+        #{'container': 'bigdata',
+        #'table_path': 'stream_processing/stream_converge',
+        #'results_file': 'batch_results/manual.csv',
+        #'some_list': [1, 2, 3],
+        #'a_boolean': True}
